@@ -1,0 +1,19 @@
+# Ollama engine binaries (too large for git — users download these)
+staging/engine/linux-amd64/bin/
+staging/engine/linux-amd64/lib/
+staging/engine/darwin/
+
+# Model files (multi-GB blobs)
+staging/models/
+
+# Runtime artifacts
+staging/logs/
+*.pid
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Internal planning (not for public)
+Plans/
