@@ -278,9 +278,17 @@ echo ""
 # Unmount any existing partitions
 case "${BUILD_OS}" in
     linux)
+        # Kill any processes using the drive, then force unmount
+        sudo fuser -k "${TARGET_DEV}" 2>/dev/null || true
+        sleep 1
         for part in ${TARGET_DEV}*; do
-            sudo umount "${part}" 2>/dev/null || true
+            sudo umount -l "${part}" 2>/dev/null || true
         done
+        # Also catch auto-mounter mount points
+        mount | grep "${TARGET_DEV}" | awk '{print $3}' | while read -r mp; do
+            sudo umount -l "${mp}" 2>/dev/null || true
+        done
+        sleep 1
         log "Formatting ${TARGET_DEV} as exFAT (label: GHOSTAI)..."
         sudo mkfs.exfat -n GHOSTAI "${TARGET_DEV}"
         log "Format complete"
