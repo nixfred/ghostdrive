@@ -69,50 +69,30 @@ fi
 
 log "Build system: ${OS}"
 
+# ── Bash version check ──────────────────────────────────────────────
+# macOS ships bash 3.2 which lacks associative arrays
+if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
+    die "GhostDrive builder requires bash 4.0 or newer.\n  Your version: ${BASH_VERSION}\n\n  On macOS, install with: brew install bash\n  Then run: /opt/homebrew/bin/bash build.sh"
+fi
+
 # ── Model catalog ────────────────────────────────────────────────────
-declare -A MODEL_SIZES MODEL_DESCS MODEL_RAM
-MODEL_SIZES=(
-    ["gemma3:4b"]="3.3"
-    ["gemma3:12b"]="8.1"
-    ["qwen3:8b"]="5.2"
-    ["llama3.1:8b"]="4.9"
-    ["qwen2.5-coder:7b"]="4.7"
-    ["llava:7b"]="4.7"
-    ["phi4:14b"]="9.1"
-    ["deepseek-r1:8b"]="4.9"
-)
-MODEL_DESCS=(
-    ["gemma3:4b"]="Fast, great for conversation"
-    ["gemma3:12b"]="Smarter, more capable"
-    ["qwen3:8b"]="Strong reasoning and analysis"
-    ["llama3.1:8b"]="Great all-around assistant"
-    ["qwen2.5-coder:7b"]="Code generation specialist"
-    ["llava:7b"]="Vision + text understanding"
-    ["phi4:14b"]="Deep reasoning (needs 32GB RAM)"
-    ["deepseek-r1:8b"]="Step-by-step problem solver"
-)
-MODEL_RAM=(
-    ["gemma3:4b"]="8"
-    ["gemma3:12b"]="16"
-    ["qwen3:8b"]="16"
-    ["llama3.1:8b"]="16"
-    ["qwen2.5-coder:7b"]="16"
-    ["llava:7b"]="16"
-    ["phi4:14b"]="32"
-    ["deepseek-r1:8b"]="16"
+# Format: "name|size_gb|ram_gb|description"
+MODEL_CATALOG=(
+    "gemma3:4b|3.3|8|Fast, great for conversation"
+    "qwen3:8b|5.2|16|Strong reasoning and analysis"
+    "llama3.1:8b|4.9|16|Great all-around assistant"
+    "gemma3:12b|8.1|16|Smarter, more capable"
+    "qwen2.5-coder:7b|4.7|16|Code generation specialist"
+    "llava:7b|4.7|16|Vision + text understanding"
+    "deepseek-r1:8b|4.9|16|Step-by-step problem solver"
+    "phi4:14b|9.1|32|Deep reasoning (needs 32GB RAM)"
 )
 
-# Ordered list for display
-MODEL_ORDER=(
-    "gemma3:4b"
-    "qwen3:8b"
-    "llama3.1:8b"
-    "gemma3:12b"
-    "qwen2.5-coder:7b"
-    "llava:7b"
-    "deepseek-r1:8b"
-    "phi4:14b"
-)
+# Helper to extract fields from catalog entry
+catalog_name() { echo "$1" | cut -d'|' -f1; }
+catalog_size() { echo "$1" | cut -d'|' -f2; }
+catalog_ram()  { echo "$1" | cut -d'|' -f3; }
+catalog_desc() { echo "$1" | cut -d'|' -f4; }
 
 # Engine overhead (approximate GB for both Linux + macOS engines)
 ENGINE_OVERHEAD_GB=2.5
@@ -124,9 +104,11 @@ echo ""
 detect_usb_drives() {
     case "${BUILD_OS}" in
         linux)
-            # Find removable block devices
-            lsblk -dno NAME,SIZE,MODEL,TRAN 2>/dev/null | grep -i usb | while read -r name size model tran; do
-                echo "/dev/${name}|${size}|${model}"
+            # Find removable block devices using paired output to handle spaces in MODEL
+            lsblk -dpno NAME,SIZE,TRAN 2>/dev/null | grep -i usb | while read -r name size tran; do
+                local model
+                model=$(lsblk -dno MODEL "${name}" 2>/dev/null | xargs)
+                echo "${name}|${size}|${model:-USB Drive}"
             done
             ;;
         darwin)
@@ -170,6 +152,9 @@ if [ ${#USB_DRIVES[@]} -eq 1 ]; then
 else
     echo -ne "  Select a drive ${DIM}[1-${#USB_DRIVES[@]}]${NC}: "
     read -r choice
+    if ! [[ "${choice}" =~ ^[0-9]+$ ]]; then
+        die "Please enter a number."
+    fi
     SELECTED_IDX=$((choice - 1))
     if [ ${SELECTED_IDX} -lt 0 ] || [ ${SELECTED_IDX} -ge ${#USB_DRIVES[@]} ]; then
         die "Invalid selection."
@@ -205,21 +190,22 @@ echo ""
 echo -e "  ${DIM}  Select models that fit on your drive. Space available: ~${AVAILABLE_GB} GB${NC}"
 echo ""
 
-for i in "${!MODEL_ORDER[@]}"; do
-    local_model="${MODEL_ORDER[$i]}"
-    local_size="${MODEL_SIZES[$local_model]}"
-    local_desc="${MODEL_DESCS[$local_model]}"
-    local_ram="${MODEL_RAM[$local_model]}"
+for i in "${!MODEL_CATALOG[@]}"; do
+    entry="${MODEL_CATALOG[$i]}"
+    m_name=$(catalog_name "${entry}")
+    m_size=$(catalog_size "${entry}")
+    m_ram=$(catalog_ram "${entry}")
+    m_desc=$(catalog_desc "${entry}")
 
     # Check if it fits
     fits=""
-    if (( $(echo "${local_size} <= ${AVAILABLE_GB}" | bc 2>/dev/null || echo 0) )); then
+    if (( $(echo "${m_size} <= ${AVAILABLE_GB}" | bc 2>/dev/null || echo 0) )); then
         fits="${GREEN}fits${NC}"
     else
         fits="${RED}too large${NC}"
     fi
 
-    echo -e "    ${CYAN}$((i+1)))${NC} ${BOLD}${local_model}${NC}  ${DIM}${local_size} GB | ${local_ram}GB RAM | ${local_desc}${NC}  [${fits}]"
+    echo -e "    ${CYAN}$((i+1)))${NC} ${BOLD}${m_name}${NC}  ${DIM}${m_size} GB | ${m_ram}GB RAM | ${m_desc}${NC}  [${fits}]"
 done
 
 echo ""
@@ -231,11 +217,15 @@ read -r model_choices
 SELECTED_MODELS=()
 TOTAL_MODEL_GB=0
 for choice in ${model_choices}; do
+    if ! [[ "${choice}" =~ ^[0-9]+$ ]]; then
+        continue
+    fi
     idx=$((choice - 1))
-    if [ ${idx} -ge 0 ] && [ ${idx} -lt ${#MODEL_ORDER[@]} ]; then
-        model="${MODEL_ORDER[$idx]}"
+    if [ ${idx} -ge 0 ] && [ ${idx} -lt ${#MODEL_CATALOG[@]} ]; then
+        entry="${MODEL_CATALOG[$idx]}"
+        model=$(catalog_name "${entry}")
+        model_gb=$(catalog_size "${entry}")
         SELECTED_MODELS+=("${model}")
-        model_gb="${MODEL_SIZES[$model]}"
         TOTAL_MODEL_GB=$(echo "${TOTAL_MODEL_GB} + ${model_gb}" | bc 2>/dev/null || echo "${TOTAL_MODEL_GB}")
     fi
 done
@@ -392,6 +382,15 @@ if [ "${BUILD_OS}" = "linux" ]; then
 fi
 export DO_NOT_TRACK=1
 
+PULL_PID=""
+cleanup_build() {
+    if [ -n "${PULL_PID}" ] && kill -0 "${PULL_PID}" 2>/dev/null; then
+        kill "${PULL_PID}" 2>/dev/null
+        wait "${PULL_PID}" 2>/dev/null || true
+    fi
+}
+trap cleanup_build EXIT INT TERM
+
 log "Starting temporary engine for model downloads..."
 "${PULL_BIN}" serve > /tmp/ghostdrive-pull.log 2>&1 &
 PULL_PID=$!
@@ -438,7 +437,8 @@ echo ""
 log "Copying files to USB..."
 
 # Use rsync with -L to dereference symlinks (exFAT can't handle symlinks)
-rsync -rL --info=progress2 "${STAGING_DIR}/" "${MOUNT_POINT}/" 2>&1
+# Exclude logs/ so first-run welcome shows on fresh sticks
+rsync -rL --info=progress2 --exclude='logs/' "${STAGING_DIR}/" "${MOUNT_POINT}/" 2>&1
 
 # Verify critical files exist
 echo ""

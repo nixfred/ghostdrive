@@ -7,16 +7,16 @@ set -euo pipefail
 # ============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GHOST_VERSION="1.0.0"
+GHOST_VERSION="1.3.0"
 
 # ── Colors (if terminal supports them) ────────────────────────────────
 if [ -t 1 ]; then
     RED='\033[0;31m'; GREEN='\033[0;32m'; BLUE='\033[0;34m'
     CYAN='\033[0;36m'; YELLOW='\033[1;33m'; BOLD='\033[1m'; NC='\033[0m'
-    DIM='\033[2m'; WHITE='\033[1;37m'; MAGENTA='\033[0;35m'
+    DIM='\033[2m'; WHITE='\033[1;37m'
 else
     RED=''; GREEN=''; BLUE=''; CYAN=''; YELLOW=''; BOLD=''; NC=''
-    DIM=''; WHITE=''; MAGENTA=''
+    DIM=''; WHITE=''
 fi
 
 # ── Logging (internal, friendly language) ────────────────────────────

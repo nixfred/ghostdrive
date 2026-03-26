@@ -1,3 +1,19 @@
+```
+      ╔═══════════════════════════════════════════════╗
+      ║                                               ║
+      ║    ░██████╗░██╗░░██╗░█████╗░░██████╗████████╗║
+      ║    ██╔════╝░██║░░██║██╔══██╗██╔════╝╚══██╔══╝║
+      ║    ██║░░██╗░███████║██║░░██║╚█████╗░   ██║   ║
+      ║    ██║░░╚██╗██╔══██║██║░░██║░╚═══██╗   ██║   ║
+      ║    ╚██████╔╝██║░░██║╚█████╔╝██████╔╝   ██║   ║
+      ║    ░╚═════╝░╚═╝░░╚═╝░╚════╝░╚═════╝░   ╚═╝   ║
+      ║                                               ║
+      ║          D   R   I   V   E        v1.3        ║
+      ║       OWN YOUR INTELLIGENCE                   ║
+      ║                                               ║
+      ╚═══════════════════════════════════════════════╝
+```
+
 # GhostDrive — The "$129 AI USB Stick" You Saw on Instagram
 
 You've probably seen the ads. A mysterious USB stick that gives you "your own private AI" for $129. No subscription, no internet, plug and play.
@@ -166,4 +182,4 @@ MIT — Do whatever you want with it. Make your own sticks and give them to frie
 
 ---
 
-*Built with [Ollama](https://ollama.com) and open-weight models. No proprietary software. No secrets. No gotcha.*
+*GhostDrive v1.3 — Built with [Ollama](https://ollama.com) and open-weight models. No proprietary software. No secrets. No gotcha.*

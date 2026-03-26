@@ -91,11 +91,8 @@ case "${1:-help}" in
         local_data=$("${OLLAMA_BIN}" list 2>/dev/null | tail -n +2)
         if [ -n "${local_data}" ]; then
             while IFS= read -r line; do
-                local model_name
                 model_name=$(echo "${line}" | awk '{print $1}')
-                local model_size
                 model_size=$(echo "${line}" | awk '{print $3, $4}')
-                local desc
                 desc=$(describe_model "${model_name}")
 
                 echo -e "    ${BLUE}○${NC} ${BOLD}${model_name}${NC}  ${DIM}(${model_size})${NC}"
