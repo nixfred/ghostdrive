@@ -49,7 +49,7 @@ esac
 
 # Check if Ollama is already running
 ollama_running() {
-    "${OLLAMA_BIN}" list &>/dev/null 2>&1
+    "${OLLAMA_BIN}" list &>/dev/null
 }
 
 # Start a temporary Ollama instance if needed
@@ -117,7 +117,8 @@ case "${1:-help}" in
         if [ -n "${local_data}" ]; then
             while IFS= read -r line; do
                 model_name=$(echo "${line}" | awk '{print $1}')
-                model_size=$(echo "${line}" | awk '{print $3, $4}')
+                model_size=$(echo "${line}" | grep -oE '[0-9.]+ [KMGT]B' | head -1)
+                [ -z "${model_size}" ] && model_size="unknown"
                 desc=$(describe_model "${model_name}")
 
                 echo -e "    ${BLUE}○${NC} ${BOLD}${model_name}${NC}  ${DIM}(${model_size})${NC}"
@@ -160,7 +161,12 @@ case "${1:-help}" in
         ensure_ollama
         "${OLLAMA_BIN}" pull "$2"
         echo ""
-        echo -e "  ${GREEN}✓${NC} ${BOLD}$2${NC} is now available on your GhostDrive — no internet needed to use it."
+        # Verify model actually downloaded (ollama pull can exit 0 on some failures)
+        if "${OLLAMA_BIN}" show "$2" &>/dev/null; then
+            echo -e "  ${GREEN}✓${NC} ${BOLD}$2${NC} is now available on your GhostDrive — no internet needed to use it."
+        else
+            echo -e "  ${RED}✗${NC} Download may have failed. Run ${CYAN}bash models.sh list${NC} to check."
+        fi
         echo ""
         ;;
 

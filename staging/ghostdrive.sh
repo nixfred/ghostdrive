@@ -257,10 +257,10 @@ check_ram() {
 check_gpu() {
     case "${OS}" in
         Linux*)
-            if command -v nvidia-smi &>/dev/null; then
+            if command -v nvidia-smi &>/dev/null && nvidia-smi --query-gpu=name --format=csv,noheader &>/dev/null; then
                 local gpu_name
-                gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1) || true
-                if [ -n "${gpu_name}" ] && [[ "${gpu_name}" != *failed* ]]; then
+                gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
+                if [ -n "${gpu_name}" ]; then
                     log "Graphics: ${gpu_name} — accelerated responses"
                     return
                 fi
@@ -353,7 +353,9 @@ start_ollama() {
     export DO_NOT_TRACK=1
     export SCARF_NO_ANALYTICS=1
 
-    mkdir -p "${SCRIPT_DIR}/logs"
+    if ! mkdir -p "${SCRIPT_DIR}/logs" 2>/dev/null; then
+        die "Cannot write to your GhostDrive. The drive may be write-protected or corrupted."
+    fi
     "${OLLAMA_BIN}" serve >> "${SCRIPT_DIR}/logs/ollama.log" 2>&1 &
     local pid=$!
     echo "${pid}" > "${PID_FILE}"
@@ -369,7 +371,7 @@ start_ollama() {
     local max_attempts=30
 
     while [ ${attempts} -lt ${max_attempts} ]; do
-        if "${OLLAMA_BIN}" list &>/dev/null; then
+        if timeout 5 "${OLLAMA_BIN}" list &>/dev/null 2>/dev/null && kill -0 ${pid} 2>/dev/null; then
             echo -ne "\r                                                   \r"
             log "AI engine is ready"
             return 0
@@ -441,7 +443,8 @@ list_models() {
             local model_name
             model_name=$(echo "${line}" | awk '{print $1}')
             local model_size
-            model_size=$(echo "${line}" | awk '{print $3, $4}')
+            model_size=$(echo "${line}" | grep -oE '[0-9.]+ [KMGT]B' | head -1)
+            [ -z "${model_size}" ] && model_size="unknown"
             local description
             description=$(describe_model "${model_name}")
 
@@ -484,7 +487,7 @@ cleanup() {
             pkill -P "${pid}" 2>/dev/null || true
             kill "${pid}" 2>/dev/null
             local i=0
-            while [ ${i} -lt 5 ] && kill -0 "${pid}" 2>/dev/null; do
+            while [ ${i} -lt 10 ] && kill -0 "${pid}" 2>/dev/null; do
                 sleep 1
                 i=$((i + 1))
             done
@@ -519,7 +522,7 @@ main() {
         die "GhostDrive is already running in another window.\n\n  Close that window first, or run: ${CYAN}bash stop.sh${NC}"
     fi
 
-    trap cleanup EXIT
+    trap cleanup EXIT INT TERM
 
     if ! start_ollama; then
         die "Could not start the AI engine. See the messages above for help."

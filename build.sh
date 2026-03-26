@@ -218,6 +218,7 @@ read -r model_choices
 
 SELECTED_MODELS=()
 TOTAL_MODEL_GB=0
+set -f  # disable glob expansion on user input
 for choice in ${model_choices}; do
     if ! [[ "${choice}" =~ ^[0-9]+$ ]]; then
         continue
@@ -231,6 +232,7 @@ for choice in ${model_choices}; do
         TOTAL_MODEL_GB=$(echo "${TOTAL_MODEL_GB} + ${model_gb}" | bc 2>/dev/null || echo "${TOTAL_MODEL_GB}")
     fi
 done
+set +f  # re-enable glob expansion
 
 if [ ${#SELECTED_MODELS[@]} -eq 0 ]; then
     die "No models selected. You need at least one model."
@@ -293,10 +295,12 @@ case "${BUILD_OS}" in
         # Mount it
         MOUNT_POINT="/media/$(whoami)/GHOSTAI"
         sudo mkdir -p "${MOUNT_POINT}"
-        # Try uid/gid options (works with FUSE exfat), fall back to plain mount (kernel exfat driver)
-        if ! sudo mount -o rw,uid=$(id -u),gid=$(id -g) "${TARGET_DEV}" "${MOUNT_POINT}" 2>/dev/null; then
-            sudo mount "${TARGET_DEV}" "${MOUNT_POINT}"
-            sudo chown "$(id -u):$(id -g)" "${MOUNT_POINT}"
+        # Try uid/gid (FUSE exfat), then umask=000 (kernel exfat), then plain mount
+        if ! sudo mount -o "rw,uid=$(id -u),gid=$(id -g)" "${TARGET_DEV}" "${MOUNT_POINT}" 2>/dev/null; then
+            if ! sudo mount -o "rw,umask=000" "${TARGET_DEV}" "${MOUNT_POINT}" 2>/dev/null; then
+                sudo mount "${TARGET_DEV}" "${MOUNT_POINT}" || \
+                    die "Could not mount ${TARGET_DEV} with write permissions."
+            fi
         fi
         log "Mounted at ${MOUNT_POINT}"
         ;;
@@ -417,6 +421,10 @@ cleanup_build() {
         wait "${PULL_PID}" 2>/dev/null || true
     fi
     rm -rf "${BUILD_TMP}" 2>/dev/null || true
+    # Warn about mounted drive on failure (don't unmount — user may want to inspect)
+    if [ -n "${MOUNT_POINT:-}" ] && mountpoint -q "${MOUNT_POINT}" 2>/dev/null; then
+        echo "  Note: USB drive is still mounted at ${MOUNT_POINT}"
+    fi
 }
 trap cleanup_build EXIT INT TERM
 
@@ -454,12 +462,12 @@ kill ${PULL_PID} 2>/dev/null || true
 wait ${PULL_PID} 2>/dev/null || true
 PULL_PID=""
 
-# Set default model to the first selected
+# Set default model to the first selected (grep+append avoids sed portability issues)
 DEFAULT_MODEL="${SELECTED_MODELS[0]}"
 if [ -f "${STAGING_DIR}/config.env" ]; then
-    sed -i.bak "s|^DEFAULT_MODEL=.*|DEFAULT_MODEL=${DEFAULT_MODEL}|" "${STAGING_DIR}/config.env" 2>/dev/null || \
-        sed -i '' "s|^DEFAULT_MODEL=.*|DEFAULT_MODEL=${DEFAULT_MODEL}|" "${STAGING_DIR}/config.env" 2>/dev/null || true
-    rm -f "${STAGING_DIR}/config.env.bak"
+    grep -v '^DEFAULT_MODEL=' "${STAGING_DIR}/config.env" > "${STAGING_DIR}/config.env.tmp" || true
+    echo "DEFAULT_MODEL=${DEFAULT_MODEL}" >> "${STAGING_DIR}/config.env.tmp"
+    mv "${STAGING_DIR}/config.env.tmp" "${STAGING_DIR}/config.env"
 else
     echo "DEFAULT_MODEL=${DEFAULT_MODEL}" > "${STAGING_DIR}/config.env"
 fi
