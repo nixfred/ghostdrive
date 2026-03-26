@@ -7,12 +7,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Bash 4+ required for process substitution in config parser
-if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
-    echo "models.sh requires bash 4+. On macOS: brew install bash" >&2
-    exit 1
-fi
-
 # Colors
 if [ -t 1 ]; then
     GREEN='\033[0;32m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'
@@ -36,8 +30,10 @@ chmod +x "${OLLAMA_BIN}" 2>/dev/null || true
 OLLAMA_PORT=11435
 if [ -f "${SCRIPT_DIR}/config.env" ]; then
     while IFS='=' read -r key value; do
+        [ -z "${value}" ] && continue
         value="${value%%#*}"
-        value="${value%"${value##*[! ]}"}"
+        value="${value%% }"
+        value="${value%%	}"
         case "${key}" in
             OLLAMA_PORT) OLLAMA_PORT="${value}" ;;
         esac
@@ -63,7 +59,7 @@ ensure_ollama() {
     if ! ollama_running; then
         echo -e "  ${DIM}Starting AI engine...${NC}"
         mkdir -p "${SCRIPT_DIR}/logs" 2>/dev/null || true
-        "${OLLAMA_BIN}" serve > "${SCRIPT_DIR}/logs/ollama-models.log" 2>&1 &
+        "${OLLAMA_BIN}" serve >> "${SCRIPT_DIR}/logs/ollama-models.log" 2>&1 &
         TEMP_PID=$!
         TEMP_OLLAMA=true
         # Poll up to 15 seconds for engine to start

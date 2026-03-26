@@ -270,16 +270,19 @@ echo ""
 # Unmount any existing partitions
 case "${BUILD_OS}" in
     linux)
-        # Kill any processes using the drive, then force unmount
-        sudo fuser -k "${TARGET_DEV}" 2>/dev/null || true
-        sleep 1
+        # Warn if processes are using the drive (don't kill them blindly)
+        if sudo fuser -m "${TARGET_DEV}" &>/dev/null; then
+            warn "Programs are still using ${TARGET_DEV}. Close file managers or terminals browsing it."
+            echo -ne "  Press Enter when ready... "
+            read -r
+        fi
         # Unmount all partitions on this device
         if command -v findmnt &>/dev/null; then
             findmnt -rno TARGET -S "${TARGET_DEV}" 2>/dev/null | while read -r mp; do
                 sudo umount -l "${mp}" 2>/dev/null || true
             done
         fi
-        for part in "${TARGET_DEV}"*; do
+        for part in "${TARGET_DEV}" "${TARGET_DEV}"[0-9]*; do
             sudo umount -l "${part}" 2>/dev/null || true
         done
         sleep 1
@@ -328,20 +331,25 @@ if [ -f "${LINUX_ENGINE_DIR}/bin/ollama" ]; then
 else
     log "Downloading Linux engine..."
     mkdir -p "${LINUX_ENGINE_DIR}/bin" "${LINUX_ENGINE_DIR}/lib"
-    wget -q --show-progress -O ${BUILD_TMP}/ollama-linux.tar.zst \
+    wget -q --show-progress -O "${BUILD_TMP}"/ollama-linux.tar.zst \
         https://ollama.com/download/ollama-linux-amd64.tar.zst 2>&1
 
     log "Extracting Linux engine..."
-    rm -rf ${BUILD_TMP}/linux-extract
-    mkdir -p ${BUILD_TMP}/linux-extract
-    ZSTD_CMD=$(command -v unzstd 2>/dev/null || echo "zstd -d")
-    tar --use-compress-program="${ZSTD_CMD}" -xf ${BUILD_TMP}/ollama-linux.tar.zst \
-        -C ${BUILD_TMP}/linux-extract
+    rm -rf "${BUILD_TMP}"/linux-extract
+    mkdir -p "${BUILD_TMP}"/linux-extract
+    if command -v unzstd &>/dev/null; then
+        tar --use-compress-program=unzstd -xf "${BUILD_TMP}"/ollama-linux.tar.zst \
+            -C "${BUILD_TMP}/linux-extract"
+    else
+        zstd -d "${BUILD_TMP}"/ollama-linux.tar.zst -o "${BUILD_TMP}"/ollama-linux.tar
+        tar -xf "${BUILD_TMP}"/ollama-linux.tar -C "${BUILD_TMP}/linux-extract"
+        rm -f "${BUILD_TMP}"/ollama-linux.tar
+    fi
 
-    cp ${BUILD_TMP}/linux-extract/bin/ollama "${LINUX_ENGINE_DIR}/bin/"
-    cp -r ${BUILD_TMP}/linux-extract/lib/ollama/* "${LINUX_ENGINE_DIR}/lib/"
+    cp "${BUILD_TMP}"/linux-extract/bin/ollama "${LINUX_ENGINE_DIR}/bin/"
+    cp -r "${BUILD_TMP}"/linux-extract/lib/ollama/* "${LINUX_ENGINE_DIR}/lib/"
     chmod +x "${LINUX_ENGINE_DIR}/bin/ollama"
-    rm -rf ${BUILD_TMP}/linux-extract ${BUILD_TMP}/ollama-linux.tar.zst
+    rm -rf "${BUILD_TMP}"/linux-extract "${BUILD_TMP}"/ollama-linux.tar.zst
     log "Linux engine ready"
 fi
 
@@ -351,16 +359,16 @@ if [ -d "${MACOS_ENGINE_DIR}/Ollama.app" ]; then
 else
     log "Downloading macOS engine..."
     mkdir -p "${MACOS_ENGINE_DIR}"
-    wget -q --show-progress -O ${BUILD_TMP}/ollama-darwin.zip \
+    wget -q --show-progress -O "${BUILD_TMP}"/ollama-darwin.zip \
         https://github.com/ollama/ollama/releases/latest/download/Ollama-darwin.zip 2>&1
 
     log "Extracting macOS engine..."
-    rm -rf ${BUILD_TMP}/darwin-extract
-    mkdir -p ${BUILD_TMP}/darwin-extract
-    unzip -q ${BUILD_TMP}/ollama-darwin.zip -d ${BUILD_TMP}/darwin-extract
+    rm -rf "${BUILD_TMP}"/darwin-extract
+    mkdir -p "${BUILD_TMP}"/darwin-extract
+    unzip -q "${BUILD_TMP}"/ollama-darwin.zip -d "${BUILD_TMP}"/darwin-extract
 
-    cp -r ${BUILD_TMP}/darwin-extract/Ollama.app "${MACOS_ENGINE_DIR}/"
-    rm -rf ${BUILD_TMP}/darwin-extract ${BUILD_TMP}/ollama-darwin.zip
+    cp -r "${BUILD_TMP}"/darwin-extract/Ollama.app "${MACOS_ENGINE_DIR}/"
+    rm -rf "${BUILD_TMP}"/darwin-extract "${BUILD_TMP}"/ollama-darwin.zip
     log "macOS engine ready"
 fi
 
@@ -413,7 +421,7 @@ cleanup_build() {
 trap cleanup_build EXIT INT TERM
 
 log "Starting temporary engine for model downloads..."
-"${PULL_BIN}" serve > ${BUILD_TMP}/pull.log 2>&1 &
+"${PULL_BIN}" serve > "${BUILD_TMP}"/pull.log 2>&1 &
 PULL_PID=$!
 
 # Wait for it to be ready
@@ -465,7 +473,7 @@ log "Copying files to USB..."
 
 # Use rsync with -L to dereference symlinks (exFAT can't handle symlinks)
 # Exclude logs/ so first-run welcome shows on fresh sticks
-if rsync --version 2>/dev/null | head -1 | grep -qE 'version [3-9]'; then
+if rsync -rL --info=progress2 --dry-run --exclude='logs/' "${STAGING_DIR}/" "${MOUNT_POINT}/" &>/dev/null; then
     rsync -rL --info=progress2 --exclude='logs/' "${STAGING_DIR}/" "${MOUNT_POINT}/" 2>&1
 else
     rsync -rLv --exclude='logs/' "${STAGING_DIR}/" "${MOUNT_POINT}/" 2>&1

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap '' PIPE 2>/dev/null || true  # Ignore SIGPIPE (broken pipe from piped output)
 
 # ============================================================================
 #  GhostDrive — Your Private AI. No Internet Required.
@@ -99,8 +100,10 @@ OLLAMA_MAX_LOADED_MODELS=1
 # Parse config safely (don't source — USB stick could have been tampered with)
 if [ -f "${SCRIPT_DIR}/config.env" ]; then
     while IFS='=' read -r key value; do
-        value="${value%%#*}"   # strip inline comments
-        value="${value%"${value##*[! ]}"}"  # strip trailing whitespace
+        [ -z "${value}" ] && continue        # skip lines with no value
+        value="${value%%#*}"                   # strip inline comments
+        value="${value%% }"                    # strip trailing spaces
+        value="${value%%	}"                  # strip trailing tabs
         case "${key}" in
             OLLAMA_PORT) OLLAMA_PORT="${value}" ;;
             DEFAULT_MODEL) DEFAULT_MODEL="${value}" ;;
@@ -235,6 +238,7 @@ check_ram() {
             ;;
     esac
 
+    [[ "${ram_mb}" =~ ^[0-9]+$ ]] || ram_mb=0
     local ram_gb=$(( (ram_mb + 512) / 1024 ))
 
     if [ "${ram_mb}" -lt 7000 ]; then
@@ -280,7 +284,9 @@ check_port() {
         Linux*)
             local hex_port
             hex_port=$(printf '%04X' "${OLLAMA_PORT}")
-            if [ -f /proc/net/tcp ] && grep -qi ":${hex_port} " /proc/net/tcp 2>/dev/null; then
+            # Check for LISTEN state (0A) on both IPv4 and IPv6
+            if { [ -f /proc/net/tcp ] && awk '$4 == "0A"' /proc/net/tcp 2>/dev/null | grep -qi ":${hex_port}"; } || \
+               { [ -f /proc/net/tcp6 ] && awk '$4 == "0A"' /proc/net/tcp6 2>/dev/null | grep -qi ":${hex_port}"; }; then
                 port_in_use=true
             fi
             ;;
@@ -316,7 +322,8 @@ spinner() {
     local pid=$1
     local message="${2:-Loading}"
     local frames
-    if [[ "${LANG:-}${LC_ALL:-}" == *UTF-8* ]] || [[ "${LANG:-}${LC_ALL:-}" == *utf8* ]]; then
+    local _locale="${LANG:-}${LC_ALL:-}${LC_CTYPE:-}"
+    if [[ "${_locale}" == *[Uu][Tt][Ff]* ]]; then
         frames=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
     else
         frames=("|" "/" "-" "\\"  )
@@ -347,7 +354,7 @@ start_ollama() {
     export SCARF_NO_ANALYTICS=1
 
     mkdir -p "${SCRIPT_DIR}/logs"
-    "${OLLAMA_BIN}" serve > "${SCRIPT_DIR}/logs/ollama.log" 2>&1 &
+    "${OLLAMA_BIN}" serve >> "${SCRIPT_DIR}/logs/ollama.log" 2>&1 &
     local pid=$!
     echo "${pid}" > "${PID_FILE}"
 
@@ -384,7 +391,8 @@ start_ollama() {
         # Rotate friendly messages
         local current_msg="${startup_messages[$msg_idx]}"
         local frame_chars
-        if [[ "${LANG:-}${LC_ALL:-}" == *UTF-8* ]] || [[ "${LANG:-}${LC_ALL:-}" == *utf8* ]]; then
+        local _locale="${LANG:-}${LC_ALL:-}${LC_CTYPE:-}"
+    if [[ "${_locale}" == *[Uu][Tt][Ff]* ]]; then
             frame_chars=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
         else
             frame_chars=("|" "/" "-" "\\")
@@ -420,7 +428,9 @@ list_models() {
     model_data=$("${OLLAMA_BIN}" list 2>/dev/null | tail -n +2) || true
 
     if [[ -z "${model_data}" ]]; then
-        if [ -f "${PID_FILE}" ] && ! kill -0 "$(cat "${PID_FILE}" 2>/dev/null)" 2>/dev/null; then
+        local check_pid
+        check_pid=$(cat "${PID_FILE}" 2>/dev/null || echo "")
+        if [ -n "${check_pid}" ] && ! kill -0 "${check_pid}" 2>/dev/null; then
             err "AI engine stopped unexpectedly. Check logs/ollama.log"
         else
             echo -e "    ${YELLOW}No models found.${NC}"
@@ -471,6 +481,7 @@ cleanup() {
         local pid
         pid=$(cat "${PID_FILE}" 2>/dev/null)
         if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            pkill -P "${pid}" 2>/dev/null || true
             kill "${pid}" 2>/dev/null
             local i=0
             while [ ${i} -lt 5 ] && kill -0 "${pid}" 2>/dev/null; do
@@ -508,11 +519,11 @@ main() {
         die "GhostDrive is already running in another window.\n\n  Close that window first, or run: ${CYAN}bash stop.sh${NC}"
     fi
 
+    trap cleanup EXIT
+
     if ! start_ollama; then
         die "Could not start the AI engine. See the messages above for help."
     fi
-
-    trap cleanup EXIT
 
     if [ "${LIST_ONLY}" = true ]; then
         list_models
@@ -536,7 +547,11 @@ main() {
     echo -e "  ${CYAN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
-    "${OLLAMA_BIN}" run "${MODEL}" || true
+    if ! "${OLLAMA_BIN}" run "${MODEL}"; then
+        echo ""
+        err "The model '${MODEL}' could not be loaded."
+        err "Run 'bash models.sh list' to see available models."
+    fi
 }
 
 main "$@"
