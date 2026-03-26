@@ -242,8 +242,8 @@ check_gpu() {
         Linux*)
             if command -v nvidia-smi &>/dev/null; then
                 local gpu_name
-                gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
-                if [ -n "${gpu_name}" ]; then
+                gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1) || true
+                if [ -n "${gpu_name}" ] && [[ ! "${gpu_name}" =~ "failed" ]]; then
                     log "Graphics: ${gpu_name} — accelerated responses"
                     return
                 fi
