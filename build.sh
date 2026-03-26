@@ -272,25 +272,29 @@ echo ""
 # Unmount any existing partitions
 case "${BUILD_OS}" in
     linux)
-        # Unmount all partitions on this device
-        if command -v findmnt &>/dev/null; then
-            findmnt -rno TARGET -S "${TARGET_DEV}" 2>/dev/null | while read -r mp; do
-                sudo umount -l "${mp}" 2>/dev/null || true
-            done
-        fi
+        # Aggressively unmount everything on this device
+        sudo umount -f "${TARGET_DEV}" 2>/dev/null || true
+        sudo umount -l "${TARGET_DEV}" 2>/dev/null || true
         for part in "${TARGET_DEV}" "${TARGET_DEV}"[0-9]*; do
+            sudo umount -f "${part}" 2>/dev/null || true
             sudo umount -l "${part}" 2>/dev/null || true
         done
-        sleep 1
-        # If still busy after unmount, force-release (user already typed YES)
-        if sudo fuser -m "${TARGET_DEV}" &>/dev/null 2>&1; then
-            warn "Drive still busy — force-releasing processes..."
-            sudo fuser -km "${TARGET_DEV}" 2>/dev/null || true
-            sleep 2
-        fi
+        # Also unmount by label (catches auto-mounter paths)
+        sudo umount -f /media/*/GHOSTAI 2>/dev/null || true
+        sudo umount -l /media/*/GHOSTAI 2>/dev/null || true
+        sleep 2
+
         log "Formatting ${TARGET_DEV} as exFAT (label: GHOSTAI)..."
         if ! sudo mkfs.exfat -n GHOSTAI "${TARGET_DEV}" 2>&1; then
-            die "Format failed. The drive may still be in use.\n  Try: sudo umount /dev/sda && sudo mkfs.exfat -n GHOSTAI /dev/sda"
+            echo ""
+            err "Format failed — drive is still busy."
+            err ""
+            err "Try running these commands manually first:"
+            err "  sudo umount -f ${TARGET_DEV}"
+            err "  sudo umount -f /media/\$(whoami)/GHOSTAI"
+            err ""
+            err "Then run build.sh again."
+            exit 1
         fi
         log "Format complete"
 
