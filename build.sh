@@ -272,12 +272,6 @@ echo ""
 # Unmount any existing partitions
 case "${BUILD_OS}" in
     linux)
-        # Warn if processes are using the drive (don't kill them blindly)
-        if sudo fuser -m "${TARGET_DEV}" &>/dev/null; then
-            warn "Programs are still using ${TARGET_DEV}. Close file managers or terminals browsing it."
-            echo -ne "  Press Enter when ready... "
-            read -r
-        fi
         # Unmount all partitions on this device
         if command -v findmnt &>/dev/null; then
             findmnt -rno TARGET -S "${TARGET_DEV}" 2>/dev/null | while read -r mp; do
@@ -288,8 +282,16 @@ case "${BUILD_OS}" in
             sudo umount -l "${part}" 2>/dev/null || true
         done
         sleep 1
+        # If still busy after unmount, force-release (user already typed YES)
+        if sudo fuser -m "${TARGET_DEV}" &>/dev/null 2>&1; then
+            warn "Drive still busy — force-releasing processes..."
+            sudo fuser -km "${TARGET_DEV}" 2>/dev/null || true
+            sleep 2
+        fi
         log "Formatting ${TARGET_DEV} as exFAT (label: GHOSTAI)..."
-        sudo mkfs.exfat -n GHOSTAI "${TARGET_DEV}"
+        if ! sudo mkfs.exfat -n GHOSTAI "${TARGET_DEV}" 2>&1; then
+            die "Format failed. The drive may still be in use.\n  Try: sudo umount /dev/sda && sudo mkfs.exfat -n GHOSTAI /dev/sda"
+        fi
         log "Format complete"
 
         # Mount it
