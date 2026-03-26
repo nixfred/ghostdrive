@@ -16,40 +16,62 @@ GhostDrive is a portable, offline AI assistant on a USB stick. It works on Linux
 
 ---
 
-## Build Your Own in 10 Minutes
+## Build Your Own in 5 Minutes
 
 ### What you need
 
 - A USB stick (8GB minimum, 32GB recommended) — **~$8**
 - A computer with internet (just for the one-time build)
-- About 10 minutes
+- About 5 minutes
 
-### Step 1: Format the USB as exFAT
+### Automated Build (Recommended)
+
+The builder handles everything — detects your USB, lets you pick models, downloads engines, formats, copies, and verifies:
+
+```bash
+git clone https://github.com/nixfred/ghostdrive.git
+cd ghostdrive
+bash build.sh
+```
+
+It will walk you through:
+1. Selecting your USB drive
+2. Choosing AI models that fit your stick
+3. Formatting the drive
+4. Downloading engines and models
+5. Copying everything and verifying
+
+That's it. You just saved $121.
+
+### Manual Build
+
+<details>
+<summary>Click to expand manual steps (if you prefer doing it yourself)</summary>
+
+#### Step 1: Format the USB as exFAT
 
 exFAT works on both Linux and Mac. Label it `GHOSTAI`.
 
 **Linux:**
 ```bash
-# Find your USB device (BE CAREFUL — wrong device = data loss)
-lsblk
-# Format it (replace sdX with your actual device)
-sudo mkfs.exfat -n GHOSTAI /dev/sdX
+lsblk                                    # find your USB device
+sudo mkfs.exfat -n GHOSTAI /dev/sdX      # replace sdX with your device
 ```
 
 **Mac:**
 ```bash
-diskutil list  # find your USB
+diskutil list                             # find your USB
 diskutil eraseDisk ExFAT GHOSTAI /dev/diskN
 ```
 
-### Step 2: Clone this repo
+#### Step 2: Clone this repo
 
 ```bash
 git clone https://github.com/nixfred/ghostdrive.git
 cd ghostdrive
 ```
 
-### Step 3: Download the AI engines
+#### Step 3: Download the AI engines
 
 ```bash
 # Linux engine
@@ -66,42 +88,32 @@ unzip /tmp/ollama-darwin.zip -d /tmp/ollama-darwin-extract
 cp -r /tmp/ollama-darwin-extract/Ollama.app staging/engine/darwin/
 ```
 
-### Step 4: Pull a model
+#### Step 4: Pull a model
 
 ```bash
-# Start a temporary Ollama instance pointing at the USB model directory
 OLLAMA_MODELS="$(pwd)/staging/models" OLLAMA_HOST="127.0.0.1:11435" \
   staging/engine/linux-amd64/bin/ollama serve &
 
-# Wait a few seconds, then pull a model
 OLLAMA_HOST="127.0.0.1:11435" staging/engine/linux-amd64/bin/ollama pull gemma3:4b
-
-# Optional: add a bigger model if your USB has room
 OLLAMA_HOST="127.0.0.1:11435" staging/engine/linux-amd64/bin/ollama pull qwen3:8b
-
-# Kill the temp server
 kill %1
 ```
 
-### Step 5: Copy to USB
+#### Step 5: Copy to USB
 
 ```bash
-# Copy everything from staging/ to your mounted USB
-cp -r staging/* /media/$(whoami)/GHOSTAI/
-# or on Mac:
-cp -r staging/* /Volumes/GHOSTAI/
+rsync -rL staging/ /media/$(whoami)/GHOSTAI/    # Linux
+rsync -rL staging/ /Volumes/GHOSTAI/             # Mac
 ```
 
-### Step 6: Test it
-
-Plug the USB into any Linux or Mac machine and run:
+#### Step 6: Test it
 
 ```bash
 cd /media/$(whoami)/GHOSTAI   # or /Volumes/GHOSTAI on Mac
 bash ghostdrive.sh
 ```
 
-That's it. You just saved $121.
+</details>
 
 ---
 
