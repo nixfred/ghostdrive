@@ -177,7 +177,8 @@ parse_size_gb() {
 }
 
 USB_SIZE_GB=$(parse_size_gb "${TARGET_SIZE}")
-AVAILABLE_GB=$(echo "${USB_SIZE_GB} - ${ENGINE_OVERHEAD_GB}" | bc 2>/dev/null || echo "$(( ${USB_SIZE_GB%.*} - 3 ))")
+USB_SIZE_GB="${USB_SIZE_GB:-0}"
+AVAILABLE_GB=$(echo "${USB_SIZE_GB} - ${ENGINE_OVERHEAD_GB}" | bc 2>/dev/null || echo "0")
 
 echo ""
 log "Selected: ${TARGET_DEV} (${TARGET_SIZE} — ${TARGET_MODEL})"
@@ -199,7 +200,7 @@ for i in "${!MODEL_CATALOG[@]}"; do
 
     # Check if it fits
     fits=""
-    if (( $(echo "${m_size} <= ${AVAILABLE_GB}" | bc 2>/dev/null || echo 0) )); then
+    if [ "$(echo "${m_size} <= ${AVAILABLE_GB}" | bc 2>/dev/null || echo 0)" = "1" ]; then
         fits="${GREEN}fits${NC}"
     else
         fits="${RED}too large${NC}"
@@ -240,7 +241,7 @@ echo -e "  ${DIM}  Total model size: ~${TOTAL_MODEL_GB} GB${NC}"
 
 # Check if it fits
 TOTAL_NEEDED=$(echo "${TOTAL_MODEL_GB} + ${ENGINE_OVERHEAD_GB}" | bc 2>/dev/null || echo 99)
-if (( $(echo "${TOTAL_NEEDED} > ${USB_SIZE_GB}" | bc 2>/dev/null || echo 0) )); then
+if [ "$(echo "${TOTAL_NEEDED} > ${USB_SIZE_GB}" | bc 2>/dev/null || echo 0)" = "1" ]; then
     warn "Selected models (~${TOTAL_MODEL_GB} GB) + engines (~${ENGINE_OVERHEAD_GB} GB) may not fit on ${TARGET_SIZE} drive."
     echo -ne "  Continue anyway? ${DIM}[y/N]${NC} "
     read -r confirm
@@ -396,11 +397,12 @@ log "Starting temporary engine for model downloads..."
 PULL_PID=$!
 
 # Wait for it to be ready
-for i in $(seq 1 30); do
+for (( i=1; i<=30; i++ )); do
     if "${PULL_BIN}" list &>/dev/null; then
         break
     fi
     if ! kill -0 ${PULL_PID} 2>/dev/null; then
+        PULL_PID=""
         die "Engine failed to start for model downloads.\n  Check /tmp/ghostdrive-pull.log"
     fi
     sleep 1
@@ -422,11 +424,12 @@ log "Verifying models..."
 # Kill temp server
 kill ${PULL_PID} 2>/dev/null || true
 wait ${PULL_PID} 2>/dev/null || true
+PULL_PID=""
 
 # Set default model to the first (smallest) selected
 DEFAULT_MODEL="${SELECTED_MODELS[0]}"
-sed -i.bak "s/^DEFAULT_MODEL=.*/DEFAULT_MODEL=${DEFAULT_MODEL}/" "${STAGING_DIR}/config.env" 2>/dev/null || \
-    sed -i '' "s/^DEFAULT_MODEL=.*/DEFAULT_MODEL=${DEFAULT_MODEL}/" "${STAGING_DIR}/config.env"
+sed -i.bak "s|^DEFAULT_MODEL=.*|DEFAULT_MODEL=${DEFAULT_MODEL}|" "${STAGING_DIR}/config.env" 2>/dev/null || \
+    sed -i '' "s|^DEFAULT_MODEL=.*|DEFAULT_MODEL=${DEFAULT_MODEL}|" "${STAGING_DIR}/config.env"
 rm -f "${STAGING_DIR}/config.env.bak"
 
 # ── Step 6: Copy to USB ─────────────────────────────────────────────

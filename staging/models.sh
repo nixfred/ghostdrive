@@ -26,12 +26,18 @@ esac
 
 chmod +x "${OLLAMA_BIN}" 2>/dev/null || true
 
-export OLLAMA_MODELS="${SCRIPT_DIR}/models"
-export OLLAMA_HOST="127.0.0.1:11435"
-
-if [ "${OS}" = "Linux" ]; then
-    export OLLAMA_RUNNERS_DIR="${SCRIPT_DIR}/engine/linux-amd64/lib"
+# Load port from config (match ghostdrive.sh behavior)
+OLLAMA_PORT=11435
+if [ -f "${SCRIPT_DIR}/config.env" ]; then
+    source "${SCRIPT_DIR}/config.env"
 fi
+
+export OLLAMA_MODELS="${SCRIPT_DIR}/models"
+export OLLAMA_HOST="127.0.0.1:${OLLAMA_PORT}"
+
+case "${OS}" in
+    Linux*) export OLLAMA_RUNNERS_DIR="${SCRIPT_DIR}/engine/linux-amd64/lib" ;;
+esac
 
 # Check if Ollama is already running
 ollama_running() {

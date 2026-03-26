@@ -137,9 +137,9 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -m|--model) REQUESTED_MODEL="$2"; shift 2 ;;
+        -m|--model) [ -z "${2:-}" ] && die "Option -m requires a model name."; REQUESTED_MODEL="$2"; shift 2 ;;
         -l|--list)  LIST_ONLY=true; shift ;;
-        -p|--port)  OLLAMA_PORT="$2"; shift 2 ;;
+        -p|--port)  [ -z "${2:-}" ] && die "Option -p requires a port number."; OLLAMA_PORT="$2"; shift 2 ;;
         -h|--help)  usage ;;
         -*)         die "Unknown option: $1\n\n  Run ${CYAN}bash ghostdrive.sh --help${NC} to see available options." ;;
         *)          REQUESTED_MODEL="$1"; shift ;;
@@ -393,9 +393,9 @@ list_models() {
     echo ""
 
     local model_data
-    model_data=$("${OLLAMA_BIN}" list 2>/dev/null | tail -n +2)
+    model_data=$("${OLLAMA_BIN}" list 2>/dev/null | tail -n +2) || true
 
-    if [ -z "${model_data}" ]; then
+    if [[ -z "${model_data}" ]]; then
         echo -e "    ${YELLOW}No models found.${NC}"
         echo -e "    ${DIM}Use ${NC}bash models.sh pull gemma3:4b${DIM} to add one (requires internet).${NC}"
     else
