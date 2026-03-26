@@ -7,7 +7,19 @@ PID_FILE="${SCRIPT_DIR}/logs/ghostdrive.pid"
 if [ -f "${PID_FILE}" ]; then
     pid=$(cat "${PID_FILE}" 2>/dev/null)
     if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
-        kill "${pid}" 2>/dev/null
+        # Kill child processes first (Ollama spawns runner processes)
+        pkill -P "${pid}" 2>/dev/null || true
+        kill "${pid}" 2>/dev/null || true
+        # Wait for graceful shutdown
+        i=0
+        while [ ${i} -lt 5 ] && kill -0 "${pid}" 2>/dev/null; do
+            sleep 1
+            i=$((i + 1))
+        done
+        # Force kill if still alive
+        if kill -0 "${pid}" 2>/dev/null; then
+            kill -9 "${pid}" 2>/dev/null || true
+        fi
         echo "GhostDrive stopped (PID: ${pid})."
     else
         echo "GhostDrive was not running (stale PID file)."

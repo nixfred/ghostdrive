@@ -139,7 +139,9 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         -m|--model) [ -z "${2:-}" ] && die "Option -m requires a model name."; REQUESTED_MODEL="$2"; shift 2 ;;
         -l|--list)  LIST_ONLY=true; shift ;;
-        -p|--port)  [ -z "${2:-}" ] && die "Option -p requires a port number."; OLLAMA_PORT="$2"; shift 2 ;;
+        -p|--port)  [ -z "${2:-}" ] && die "Option -p requires a port number."
+                    [[ "$2" =~ ^[0-9]+$ ]] && [ "$2" -ge 1024 ] && [ "$2" -le 65535 ] || die "Port must be a number between 1024 and 65535."
+                    OLLAMA_PORT="$2"; shift 2 ;;
         -h|--help)  usage ;;
         -*)         die "Unknown option: $1\n\n  Run ${CYAN}bash ghostdrive.sh --help${NC} to see available options." ;;
         *)          REQUESTED_MODEL="$1"; shift ;;
@@ -187,8 +189,8 @@ chmod +x "${OLLAMA_BIN}" 2>/dev/null || {
 }
 
 # Also fix permissions on any shared libraries
-find "${RUNNERS_DIR}" -name "*.so" -exec chmod +x {} \; 2>/dev/null || true
-find "${RUNNERS_DIR}" -name "*.dylib" -exec chmod +x {} \; 2>/dev/null || true
+find "${RUNNERS_DIR}" -name "*.so" -exec chmod +x {} + 2>/dev/null || true
+find "${RUNNERS_DIR}" -name "*.dylib" -exec chmod +x {} + 2>/dev/null || true
 
 # ── Model descriptions (friendly names) ──────────────────────────────
 describe_model() {
@@ -243,7 +245,7 @@ check_gpu() {
             if command -v nvidia-smi &>/dev/null; then
                 local gpu_name
                 gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1) || true
-                if [ -n "${gpu_name}" ] && [[ ! "${gpu_name}" =~ "failed" ]]; then
+                if [ -n "${gpu_name}" ] && [[ "${gpu_name}" != *failed* ]]; then
                     log "Graphics: ${gpu_name} — accelerated responses"
                     return
                 fi
@@ -420,7 +422,10 @@ list_models() {
 }
 
 # ── Cleanup / shutdown ────────────────────────────────────────────────
+CLEANUP_DONE=false
 cleanup() {
+    [ "${CLEANUP_DONE}" = true ] && return
+    CLEANUP_DONE=true
     echo ""
     echo ""
     echo -e "  ${CYAN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -452,8 +457,6 @@ cleanup() {
         fi
         rm -f "${PID_FILE}"
     fi
-
-    exit 0
 }
 
 # ── Main ──────────────────────────────────────────────────────────────
@@ -483,15 +486,14 @@ main() {
         die "Could not start the AI engine. See the messages above for help."
     fi
 
+    trap cleanup EXIT
+
     if [ "${LIST_ONLY}" = true ]; then
         list_models
-        cleanup
         exit 0
     fi
 
     list_models
-
-    trap cleanup SIGINT SIGTERM
 
     echo -e "  ${CYAN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
@@ -508,9 +510,7 @@ main() {
     echo -e "  ${CYAN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
-    "${OLLAMA_BIN}" run "${MODEL}"
-
-    cleanup
+    "${OLLAMA_BIN}" run "${MODEL}" || true
 }
 
 main "$@"

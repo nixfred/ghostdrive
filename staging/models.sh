@@ -50,7 +50,8 @@ TEMP_PID=""
 ensure_ollama() {
     if ! ollama_running; then
         echo -e "  ${DIM}Starting AI engine...${NC}"
-        "${OLLAMA_BIN}" serve > /dev/null 2>&1 &
+        mkdir -p "${SCRIPT_DIR}/logs" 2>/dev/null || true
+        "${OLLAMA_BIN}" serve > "${SCRIPT_DIR}/logs/ollama-models.log" 2>&1 &
         TEMP_PID=$!
         TEMP_OLLAMA=true
         sleep 3
@@ -63,7 +64,7 @@ ensure_ollama() {
 
 stop_temp_ollama() {
     if [ "${TEMP_OLLAMA}" = true ] && [ -n "${TEMP_PID:-}" ]; then
-        kill "${TEMP_PID}" 2>/dev/null
+        kill "${TEMP_PID}" 2>/dev/null || true
         wait "${TEMP_PID}" 2>/dev/null || true
     fi
 }

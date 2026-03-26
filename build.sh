@@ -53,6 +53,7 @@ check_dep() {
 
 check_dep wget "apt install wget (Linux) / brew install wget (Mac)"
 check_dep rsync "apt install rsync (Linux) / brew install rsync (Mac)"
+check_dep bc "apt install bc (Linux) / brew install bc (Mac)"
 
 if [ "${BUILD_OS}" = "linux" ]; then
     if ! command -v mkfs.exfat &>/dev/null; then
@@ -168,7 +169,7 @@ parse_size_gb() {
     local size_str="$1"
     # Handle formats: "28.9G", "29G", "32.0 GB", etc.
     local num
-    num=$(echo "${size_str}" | grep -oE '[0-9]+\.?[0-9]*' | head -1)
+    num=$(echo "${size_str}" | grep -oE '[0-9]+\.?[0-9]*' | head -1 || echo "0")
     if echo "${size_str}" | grep -qi "T"; then
         echo "$(echo "${num} * 1000" | bc 2>/dev/null || echo 1000)"
     else
@@ -313,6 +314,7 @@ echo ""
 
 LINUX_ENGINE_DIR="${STAGING_DIR}/engine/linux-amd64"
 MACOS_ENGINE_DIR="${STAGING_DIR}/engine/darwin"
+BUILD_TMP=$(mktemp -d "${TMPDIR:-/tmp}/ghostdrive-build.XXXXXX")
 
 # Download Linux engine
 if [ -f "${LINUX_ENGINE_DIR}/bin/ollama" ]; then
@@ -320,19 +322,20 @@ if [ -f "${LINUX_ENGINE_DIR}/bin/ollama" ]; then
 else
     log "Downloading Linux engine..."
     mkdir -p "${LINUX_ENGINE_DIR}/bin" "${LINUX_ENGINE_DIR}/lib"
-    wget -q --show-progress -O /tmp/ghostdrive-ollama-linux.tar.zst \
+    wget -q --show-progress -O ${BUILD_TMP}/ollama-linux.tar.zst \
         https://ollama.com/download/ollama-linux-amd64.tar.zst 2>&1
 
     log "Extracting Linux engine..."
-    rm -rf /tmp/ghostdrive-linux-extract
-    mkdir -p /tmp/ghostdrive-linux-extract
-    tar --use-compress-program=unzstd -xf /tmp/ghostdrive-ollama-linux.tar.zst \
-        -C /tmp/ghostdrive-linux-extract
+    rm -rf ${BUILD_TMP}/linux-extract
+    mkdir -p ${BUILD_TMP}/linux-extract
+    ZSTD_CMD=$(command -v unzstd 2>/dev/null || echo "zstd -d")
+    tar --use-compress-program="${ZSTD_CMD}" -xf ${BUILD_TMP}/ollama-linux.tar.zst \
+        -C ${BUILD_TMP}/linux-extract
 
-    cp /tmp/ghostdrive-linux-extract/bin/ollama "${LINUX_ENGINE_DIR}/bin/"
-    cp -r /tmp/ghostdrive-linux-extract/lib/ollama/* "${LINUX_ENGINE_DIR}/lib/"
+    cp ${BUILD_TMP}/linux-extract/bin/ollama "${LINUX_ENGINE_DIR}/bin/"
+    cp -r ${BUILD_TMP}/linux-extract/lib/ollama/* "${LINUX_ENGINE_DIR}/lib/"
     chmod +x "${LINUX_ENGINE_DIR}/bin/ollama"
-    rm -rf /tmp/ghostdrive-linux-extract /tmp/ghostdrive-ollama-linux.tar.zst
+    rm -rf ${BUILD_TMP}/linux-extract ${BUILD_TMP}/ollama-linux.tar.zst
     log "Linux engine ready"
 fi
 
@@ -342,16 +345,16 @@ if [ -d "${MACOS_ENGINE_DIR}/Ollama.app" ]; then
 else
     log "Downloading macOS engine..."
     mkdir -p "${MACOS_ENGINE_DIR}"
-    wget -q --show-progress -O /tmp/ghostdrive-ollama-darwin.zip \
+    wget -q --show-progress -O ${BUILD_TMP}/ollama-darwin.zip \
         https://github.com/ollama/ollama/releases/latest/download/Ollama-darwin.zip 2>&1
 
     log "Extracting macOS engine..."
-    rm -rf /tmp/ghostdrive-darwin-extract
-    mkdir -p /tmp/ghostdrive-darwin-extract
-    unzip -q /tmp/ghostdrive-ollama-darwin.zip -d /tmp/ghostdrive-darwin-extract
+    rm -rf ${BUILD_TMP}/darwin-extract
+    mkdir -p ${BUILD_TMP}/darwin-extract
+    unzip -q ${BUILD_TMP}/ollama-darwin.zip -d ${BUILD_TMP}/darwin-extract
 
-    cp -r /tmp/ghostdrive-darwin-extract/Ollama.app "${MACOS_ENGINE_DIR}/"
-    rm -rf /tmp/ghostdrive-darwin-extract /tmp/ghostdrive-ollama-darwin.zip
+    cp -r ${BUILD_TMP}/darwin-extract/Ollama.app "${MACOS_ENGINE_DIR}/"
+    rm -rf ${BUILD_TMP}/darwin-extract ${BUILD_TMP}/ollama-darwin.zip
     log "macOS engine ready"
 fi
 
@@ -386,14 +389,15 @@ export DO_NOT_TRACK=1
 PULL_PID=""
 cleanup_build() {
     if [ -n "${PULL_PID}" ] && kill -0 "${PULL_PID}" 2>/dev/null; then
-        kill "${PULL_PID}" 2>/dev/null
+        kill "${PULL_PID}" 2>/dev/null || true
         wait "${PULL_PID}" 2>/dev/null || true
     fi
+    rm -rf "${BUILD_TMP}" 2>/dev/null || true
 }
 trap cleanup_build EXIT INT TERM
 
 log "Starting temporary engine for model downloads..."
-"${PULL_BIN}" serve > /tmp/ghostdrive-pull.log 2>&1 &
+"${PULL_BIN}" serve > ${BUILD_TMP}/pull.log 2>&1 &
 PULL_PID=$!
 
 # Wait for it to be ready
@@ -403,7 +407,7 @@ for (( i=1; i<=30; i++ )); do
     fi
     if ! kill -0 ${PULL_PID} 2>/dev/null; then
         PULL_PID=""
-        die "Engine failed to start for model downloads.\n  Check /tmp/ghostdrive-pull.log"
+        die "Engine failed to start for model downloads.\n  Check ${BUILD_TMP}/pull.log"
     fi
     sleep 1
 done
@@ -441,7 +445,11 @@ log "Copying files to USB..."
 
 # Use rsync with -L to dereference symlinks (exFAT can't handle symlinks)
 # Exclude logs/ so first-run welcome shows on fresh sticks
-rsync -rL --info=progress2 --exclude='logs/' "${STAGING_DIR}/" "${MOUNT_POINT}/" 2>&1
+if rsync --version 2>/dev/null | head -1 | grep -qE 'version [3-9]'; then
+    rsync -rL --info=progress2 --exclude='logs/' "${STAGING_DIR}/" "${MOUNT_POINT}/" 2>&1
+else
+    rsync -rLv --exclude='logs/' "${STAGING_DIR}/" "${MOUNT_POINT}/" 2>&1
+fi
 
 # Verify critical files exist
 echo ""
