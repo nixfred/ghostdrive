@@ -7,6 +7,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Bash 4+ required for process substitution in config parser
+if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
+    echo "models.sh requires bash 4+. On macOS: brew install bash" >&2
+    exit 1
+fi
+
 # Colors
 if [ -t 1 ]; then
     GREEN='\033[0;32m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'
@@ -26,10 +32,16 @@ esac
 
 chmod +x "${OLLAMA_BIN}" 2>/dev/null || true
 
-# Load port from config (match ghostdrive.sh behavior)
+# Parse config safely (don't source — USB stick could have been tampered with)
 OLLAMA_PORT=11435
 if [ -f "${SCRIPT_DIR}/config.env" ]; then
-    source "${SCRIPT_DIR}/config.env"
+    while IFS='=' read -r key value; do
+        value="${value%%#*}"
+        value="${value%"${value##*[! ]}"}"
+        case "${key}" in
+            OLLAMA_PORT) OLLAMA_PORT="${value}" ;;
+        esac
+    done < <(grep -v '^\s*#' "${SCRIPT_DIR}/config.env" 2>/dev/null || true)
 fi
 
 export OLLAMA_MODELS="${SCRIPT_DIR}/models"
@@ -54,9 +66,19 @@ ensure_ollama() {
         "${OLLAMA_BIN}" serve > "${SCRIPT_DIR}/logs/ollama-models.log" 2>&1 &
         TEMP_PID=$!
         TEMP_OLLAMA=true
-        sleep 3
+        # Poll up to 15 seconds for engine to start
+        for (( _i=1; _i<=15; _i++ )); do
+            if ollama_running; then
+                break
+            fi
+            if ! kill -0 "${TEMP_PID}" 2>/dev/null; then
+                echo -e "  ${RED}✗${NC} AI engine crashed during startup. Check logs/ollama-models.log"
+                exit 1
+            fi
+            sleep 1
+        done
         if ! ollama_running; then
-            echo -e "  ${RED}✗${NC} Could not start the AI engine."
+            echo -e "  ${RED}✗${NC} AI engine took too long to start. Check logs/ollama-models.log"
             exit 1
         fi
     fi

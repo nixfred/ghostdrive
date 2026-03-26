@@ -273,12 +273,14 @@ case "${BUILD_OS}" in
         # Kill any processes using the drive, then force unmount
         sudo fuser -k "${TARGET_DEV}" 2>/dev/null || true
         sleep 1
-        for part in ${TARGET_DEV}*; do
+        # Unmount all partitions on this device
+        if command -v findmnt &>/dev/null; then
+            findmnt -rno TARGET -S "${TARGET_DEV}" 2>/dev/null | while read -r mp; do
+                sudo umount -l "${mp}" 2>/dev/null || true
+            done
+        fi
+        for part in "${TARGET_DEV}"*; do
             sudo umount -l "${part}" 2>/dev/null || true
-        done
-        # Also catch auto-mounter mount points
-        mount | grep "${TARGET_DEV}" | awk '{print $3}' | while read -r mp; do
-            sudo umount -l "${mp}" 2>/dev/null || true
         done
         sleep 1
         log "Formatting ${TARGET_DEV} as exFAT (label: GHOSTAI)..."
@@ -288,7 +290,11 @@ case "${BUILD_OS}" in
         # Mount it
         MOUNT_POINT="/media/$(whoami)/GHOSTAI"
         sudo mkdir -p "${MOUNT_POINT}"
-        sudo mount -o rw,uid=$(id -u),gid=$(id -g) "${TARGET_DEV}" "${MOUNT_POINT}"
+        # Try uid/gid options (works with FUSE exfat), fall back to plain mount (kernel exfat driver)
+        if ! sudo mount -o rw,uid=$(id -u),gid=$(id -g) "${TARGET_DEV}" "${MOUNT_POINT}" 2>/dev/null; then
+            sudo mount "${TARGET_DEV}" "${MOUNT_POINT}"
+            sudo chown "$(id -u):$(id -g)" "${MOUNT_POINT}"
+        fi
         log "Mounted at ${MOUNT_POINT}"
         ;;
     darwin)
@@ -377,8 +383,18 @@ chmod +x "${PULL_BIN}" 2>/dev/null || true
 MODELS_DIR="${STAGING_DIR}/models"
 mkdir -p "${MODELS_DIR}"
 
-# Start temp Ollama for model pulling
+# Start temp Ollama for model pulling — check port first
 PULL_PORT=11436
+if [ "${BUILD_OS}" = "linux" ]; then
+    hex_port=$(printf '%04X' "${PULL_PORT}")
+    if [ -f /proc/net/tcp ] && grep -qi ":${hex_port} " /proc/net/tcp 2>/dev/null; then
+        die "Port ${PULL_PORT} is already in use. Another build or Ollama may be running."
+    fi
+elif [ "${BUILD_OS}" = "darwin" ]; then
+    if lsof -i ":${PULL_PORT}" -sTCP:LISTEN &>/dev/null 2>&1; then
+        die "Port ${PULL_PORT} is already in use. Another build or Ollama may be running."
+    fi
+fi
 export OLLAMA_MODELS="${MODELS_DIR}"
 export OLLAMA_HOST="127.0.0.1:${PULL_PORT}"
 if [ "${BUILD_OS}" = "linux" ]; then
@@ -430,11 +446,15 @@ kill ${PULL_PID} 2>/dev/null || true
 wait ${PULL_PID} 2>/dev/null || true
 PULL_PID=""
 
-# Set default model to the first (smallest) selected
+# Set default model to the first selected
 DEFAULT_MODEL="${SELECTED_MODELS[0]}"
-sed -i.bak "s|^DEFAULT_MODEL=.*|DEFAULT_MODEL=${DEFAULT_MODEL}|" "${STAGING_DIR}/config.env" 2>/dev/null || \
-    sed -i '' "s|^DEFAULT_MODEL=.*|DEFAULT_MODEL=${DEFAULT_MODEL}|" "${STAGING_DIR}/config.env"
-rm -f "${STAGING_DIR}/config.env.bak"
+if [ -f "${STAGING_DIR}/config.env" ]; then
+    sed -i.bak "s|^DEFAULT_MODEL=.*|DEFAULT_MODEL=${DEFAULT_MODEL}|" "${STAGING_DIR}/config.env" 2>/dev/null || \
+        sed -i '' "s|^DEFAULT_MODEL=.*|DEFAULT_MODEL=${DEFAULT_MODEL}|" "${STAGING_DIR}/config.env" 2>/dev/null || true
+    rm -f "${STAGING_DIR}/config.env.bak"
+else
+    echo "DEFAULT_MODEL=${DEFAULT_MODEL}" > "${STAGING_DIR}/config.env"
+fi
 
 # ── Step 6: Copy to USB ─────────────────────────────────────────────
 echo ""

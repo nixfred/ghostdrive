@@ -96,8 +96,19 @@ OLLAMA_FLASH_ATTENTION=1
 OLLAMA_NUM_PARALLEL=2
 OLLAMA_MAX_LOADED_MODELS=1
 
+# Parse config safely (don't source — USB stick could have been tampered with)
 if [ -f "${SCRIPT_DIR}/config.env" ]; then
-    source "${SCRIPT_DIR}/config.env"
+    while IFS='=' read -r key value; do
+        value="${value%%#*}"   # strip inline comments
+        value="${value%"${value##*[! ]}"}"  # strip trailing whitespace
+        case "${key}" in
+            OLLAMA_PORT) OLLAMA_PORT="${value}" ;;
+            DEFAULT_MODEL) DEFAULT_MODEL="${value}" ;;
+            OLLAMA_FLASH_ATTENTION) OLLAMA_FLASH_ATTENTION="${value}" ;;
+            OLLAMA_NUM_PARALLEL) OLLAMA_NUM_PARALLEL="${value}" ;;
+            OLLAMA_MAX_LOADED_MODELS) OLLAMA_MAX_LOADED_MODELS="${value}" ;;
+        esac
+    done < <(grep -v '^\s*#' "${SCRIPT_DIR}/config.env" 2>/dev/null || true)
 fi
 
 # ── Parse arguments ───────────────────────────────────────────────────
@@ -304,7 +315,12 @@ is_already_running() {
 spinner() {
     local pid=$1
     local message="${2:-Loading}"
-    local frames=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+    local frames
+    if [[ "${LANG:-}${LC_ALL:-}" == *UTF-8* ]] || [[ "${LANG:-}${LC_ALL:-}" == *utf8* ]]; then
+        frames=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+    else
+        frames=("|" "/" "-" "\\"  )
+    fi
     local i=0
 
     while kill -0 "${pid}" 2>/dev/null; do
@@ -323,7 +339,7 @@ start_ollama() {
     export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL}"
     export OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS}"
 
-    if [ "${OS}" = "Linux" ]; then
+    if [[ "${OS}" == Linux* ]]; then
         export OLLAMA_RUNNERS_DIR="${RUNNERS_DIR}"
     fi
 
@@ -359,6 +375,7 @@ start_ollama() {
             err "This might be caused by:"
             err "  • Not enough free memory — try closing other programs"
             err "  • A security program blocking it — check your antivirus"
+            err "  • Another program grabbed the connection port — try: bash ghostdrive.sh -p 11437"
             err ""
             err "Technical details are saved in: logs/ollama.log"
             return 1
@@ -366,8 +383,13 @@ start_ollama() {
 
         # Rotate friendly messages
         local current_msg="${startup_messages[$msg_idx]}"
-        local frame_chars=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
-        local frame="${frame_chars[$((attempts % 10))]}"
+        local frame_chars
+        if [[ "${LANG:-}${LC_ALL:-}" == *UTF-8* ]] || [[ "${LANG:-}${LC_ALL:-}" == *utf8* ]]; then
+            frame_chars=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+        else
+            frame_chars=("|" "/" "-" "\\")
+        fi
+        local frame="${frame_chars[$((attempts % ${#frame_chars[@]}))]}"
         echo -ne "\r  ${CYAN}${frame}${NC} ${current_msg}...  "
 
         if [ $((attempts % 10)) -eq 9 ] && [ ${msg_idx} -lt $(( ${#startup_messages[@]} - 1 )) ]; then
@@ -398,8 +420,12 @@ list_models() {
     model_data=$("${OLLAMA_BIN}" list 2>/dev/null | tail -n +2) || true
 
     if [[ -z "${model_data}" ]]; then
-        echo -e "    ${YELLOW}No models found.${NC}"
-        echo -e "    ${DIM}Use ${NC}bash models.sh pull gemma3:4b${DIM} to add one (requires internet).${NC}"
+        if [ -f "${PID_FILE}" ] && ! kill -0 "$(cat "${PID_FILE}" 2>/dev/null)" 2>/dev/null; then
+            err "AI engine stopped unexpectedly. Check logs/ollama.log"
+        else
+            echo -e "    ${YELLOW}No models found.${NC}"
+            echo -e "    ${DIM}Use ${NC}bash models.sh pull gemma3:4b${DIM} to add one (requires internet).${NC}"
+        fi
     else
         while IFS= read -r line; do
             local model_name
